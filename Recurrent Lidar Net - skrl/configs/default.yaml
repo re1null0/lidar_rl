@@ -1,0 +1,54 @@
+experiment_name: "f1tenth_experiment"    # Name for results folder
+
+# Environment settings
+env_id: "f1tenth_gym:f1tenth-v0"         # Gym env ID for F1TENTH simulator
+map_path: "maps/Levine.yaml"             # Track map for the environment
+n_envs: 1                               # Number of parallel environments
+max_episode_steps: 1000                 # Max steps per episode
+domain_randomization: true             # Randomize dynamics parameters if true
+sensor_noise:                          
+  lidar: 0.01                           # Gaussian noise for LiDAR readings (fractional)
+  speed: 0.05                           # Gaussian noise for speed sensor
+
+# Observation settings
+lidar:
+  enabled: true
+  downsample: false                    # If true, downsample LiDAR (e.g. 108 beams instead of 1080)
+include_velocity_in_obs: true          # Include vehicle speed in observation vector
+
+# Reward function weights
+reward_weights:
+  progress: 0.0        # Forward progress (unused if no track reference)
+  speed: 1.0           # Reward for speed (m/s)
+  steering_change: 0.05  # Penalty for steering angle change
+  acceleration: 0.0      # Penalty for acceleration change
+  collision: 1000.0      # Penalty for crash/collision (large)
+
+# Model and algorithm
+algorithm: "ppo"                     # Training algorithm: "ppo" (on-policy) or "dqn" (off-policy)
+model_type: "basic_lstm"             # Model architecture: basic_lstm, spatiotemporal_rln, transformer, dueling_transformer, spatiotemp_dueling_transformer
+total_timesteps: 100000             # Total training timesteps
+seq_len: 4          # frames per state
+num_ranges: 1080    # lidar points per scan
+learning_rate: 0.0003               # Optimizer learning rate
+gamma: 0.99                         # Discount factor
+gae_lambda: 0.95                    # GAE lambda for advantage estimation (PPO)
+ppo_clip: 0.2                       # PPO clipping epsilon
+ppo_epochs: 4                       # Number of epoch updates per PPO rollout
+batch_size: 64                      # Minibatch size for updates (if applicable)
+
+rollout_steps: 1024                 # Steps per rollout (on-policy update interval)
+# DQN-specific settings
+replay_buffer_size: 10000           # Replay buffer capacity
+target_update_interval: 1000        # Frequency of target network updates
+epsilon_start: 1.0                  # Starting epsilon for exploration (DQN)
+epsilon_end: 0.1                    # Final epsilon
+epsilon_decay: 50000                # Timesteps to decay epsilon linearly
+
+# Logging and output
+wandb:
+  enabled: true
+  project: "f1tenth-rl"
+  run_name: "experiment-test"
+save_interval: 10000                # How often (steps) to save model checkpoints
+seed: 42                            # Random seed for reproducibility
