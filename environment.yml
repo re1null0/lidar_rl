@@ -1,0 +1,16 @@
+name: rnn-ppo-gpu
+channels:
+  - defaults
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+  - https://repo.anaconda.com/pkgs/msys2
+dependencies:
+  - matplotlib
+  - numpy
+  - python=3.10
+  - pytorch-cuda=12.1
+  - pytorch=2.3
+  - scikit-learn
+  - torchaudio=2.3
+  - torchvision=0.18
+prefix: C:\Users\jeffe\.conda\envs\rnn-ppo-gpu
