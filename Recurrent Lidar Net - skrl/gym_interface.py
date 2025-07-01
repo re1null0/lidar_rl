@@ -124,7 +124,9 @@ class F110EnvWrapper(gym.Env):
 
         # Ensure action shape matches number of agents in underlying env
         try:
-            n_agents = len(self.env.agents)  # for newer f1tenth_gym versions
+            n_agents = len(self.env.get_wrapper_attr('agents')) \
+                if self.env.get_wrapper_attr('agents') is not None \
+                else getattr(self.env.unwrapped, "num_agents", 1)
         except AttributeError:
             n_agents = getattr(self.env, "num_agents", 1)
         if actual_action.ndim == 1:
