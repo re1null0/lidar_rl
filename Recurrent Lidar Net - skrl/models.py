@@ -2,6 +2,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+def get_model(model_type, obs_dim, action_dim, config):
+    if model_type == "basic_lstm":
+        return BasicLSTMNet(obs_dim, action_dim)
+    elif model_type == "spatiotemporal_rln":
+        return SpatioTemporalRLNNet(obs_dim, action_dim)
+    elif model_type == "transformer":
+        return TransformerNet(obs_dim, action_dim)
+    elif model_type == "dueling_transformer":
+        print("DuelingTransformer selected for PPO; using TransformerNet for actor-critic.")
+        return TransformerNet(obs_dim, action_dim)
+    elif model_type == "spatiotemp_dueling_transformer":
+        seq_len    = config.get("seq_len", 4)
+        num_ranges = config.get("num_ranges", 1080)
+        return SpatioTempDuelingTransformerNet(seq_len, num_ranges, action_dim)
+    else:
+        return BasicLSTMNet(obs_dim, action_dim)
+
 # LSTM-based network for PPO/A2C (one LSTM layer + actor and critic heads)
 class BasicLSTMNet(nn.Module):
     def __init__(self, obs_dim, action_dim, hidden_dim=128):

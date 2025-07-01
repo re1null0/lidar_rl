@@ -22,10 +22,12 @@ class F110EnvWrapper(gym.Env):
                 'm': rng.uniform(3.0, 4.5),
                 'I': rng.uniform(0.04, 0.05)
             }
+        
         # Create the underlying F1TENTH gym environment
         env_id = config.get("env_id", "f1tenth_gym:f1tenth-v0")
         map_path = config.get("map_path", None)
         self.env = gym.make(env_id, seed=seed, map=map_path, params=params, model='dynamic_ST', num_agents=1)
+
         # If max_episode_steps is set, (optional) handle termination after that many steps
         self._max_episode_steps = config.get("max_episode_steps", None)
         self.current_step = 0
@@ -68,14 +70,15 @@ class F110EnvWrapper(gym.Env):
 
     def _extract_speed(self, obs):
         """Extract forward speed from environment observation dict (handles different keys)."""
-        for k in ("linear_vels_x", "linear_vels", "vx", "speed"):
-            if k in obs:
-                v = obs[k][0] if hasattr(obs[k], "__len__") else obs[k]
-                return float(v)
-        if "linear_vels_x" in obs and "linear_vels_y" in obs:
-            # Compute speed magnitude if separate components are available
-            return float(np.hypot(obs["linear_vels_x"][0], obs["linear_vels_y"][0]))
-        return 0.0
+        try:
+            return obs['agent_0']['std_state'][3]
+        except (KeyError, IndexError, TypeError):
+            raise RuntimeError("Observation dict does not contain expected keys for speed extraction.")
+        
+
+
+
+        
 
     def _extract_lidar(self, obs):
         """Extract LiDAR scan array from observation dict (handles different keys)."""
@@ -141,17 +144,17 @@ class F110EnvWrapper(gym.Env):
         speed = abs(self._extract_speed(obs_dict))
         steer = float(actual_action[0, 0])  # steering command of first agent
         steering_delta = abs(steer - self.last_steer)
-        progress_reward = 0.0  # (optional track progress if available)
+        progress_reward = 0.0  # TODO: (optional track progress if available)
         speed_reward = speed - 1.0  # reward for speed (baseline 1 m/s)
         accel = abs(speed - self.last_speed)
         collision = bool(obs_dict.get("collisions", [False])[0])
         # Combine reward with weights
-        w = self.config["reward_weights"]
-        reward = w.get("progress", 0.0) * progress_reward \
-               + w.get("speed", 0.0) * speed_reward \
-               - w.get("steering_change", 0.0) * steering_delta \
-               - w.get("acceleration", 0.0) * accel \
-               - (w.get("collision", 0.0) * 1.0 if collision else 0.0)
+        weight = self.config["reward_weights"]
+        reward = weight.get("progress", 0.0) * progress_reward \
+               + weight.get("speed", 0.0) * speed_reward \
+               - weight.get("steering_change", 0.0) * steering_delta \
+               - weight.get("acceleration", 0.0) * accel \
+               - (weight.get("collision", 0.0) * 1.0 if collision else 0.0)
 
         # Update cumulative metrics and last values
         self.total_abs_speed += speed
@@ -205,14 +208,14 @@ class F110EnvWrapper(gym.Env):
     
     def _process_obs(self, obs_dict):
         #Process raw observation dict into a flat NumPy array (add noise, downsample LiDAR, etc.).
-        comps = []
+        obs_vec = []
 
         # Include velocity (speed) in observation if enabled
         if self.config.get("include_velocity_in_obs", True):
             speed = self._extract_speed(obs_dict)
             if self.speed_noise_std > 0:
                 speed += np.random.normal(0, self.speed_noise_std)
-            comps.append(speed)
+            obs_vec.append(speed)
 
         # Include LiDAR scan if enabled
         lidar_scan = None
@@ -226,17 +229,17 @@ class F110EnvWrapper(gym.Env):
             if self.lidar_noise_std > 0:
                 noise = np.random.normal(0, self.lidar_noise_std, size=lidar_scan.shape)
                 lidar_scan = np.clip(lidar_scan + noise * lidar_scan, 0.0, np.inf)
-            comps.extend(lidar_scan.astype(np.float32))
-        obs_array = np.array(comps, dtype=np.float32)
+            obs_vec.extend(lidar_scan.astype(np.float32))
+        obs_array = np.array(obs_vec, dtype=np.float32)
 
-        ###### SAFETY PAD so len(comps) == self.observation_space.shape[0] ####
+        ###### SAFETY PAD so len(obs_vec) == self.observation_space.shape[0] ####
         target = self.observation_space.shape[0]
-        if len(comps) < target:
-            comps.extend([0.0] * (target - len(comps)))      # pad missing slots
-        elif len(comps) > target:
-            comps = comps[:target]                           # rare: trim extras
+        if len(obs_vec) < target:
+            obs_vec.extend([0.0] * (target - len(obs_vec)))      # pad missing slots
+        elif len(obs_vec) > target:
+            obs_vec = obs_vec[:target]                           # rare: trim extras
 
-        obs_array = np.array(comps, dtype=np.float32)
+        obs_array = np.array(obs_vec, dtype=np.float32)
         return obs_array
     
 

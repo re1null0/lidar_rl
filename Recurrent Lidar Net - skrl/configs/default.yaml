@@ -27,7 +27,7 @@ reward_weights:
 # Model and algorithm
 algorithm: "ppo"                     # Training algorithm: "ppo" (on-policy) or "dqn" (off-policy)
 model_type: "basic_lstm"             # Model architecture: basic_lstm, spatiotemporal_rln, transformer, dueling_transformer, spatiotemp_dueling_transformer
-total_timesteps: 100000             # Total training timesteps
+total_timesteps: 10000000             # Total training timesteps
 seq_len: 4          # frames per state
 num_ranges: 1080    # lidar points per scan
 learning_rate: 0.0003               # Optimizer learning rate

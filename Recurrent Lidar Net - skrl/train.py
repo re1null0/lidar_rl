@@ -6,92 +6,73 @@ import torch.nn as nn
 import torch.nn.functional as F
 import shutil
 import wandb
-#from skrl.agents.torch import DQN, DQN_DEFAULT_CONFIG, PPO, PPO_DEFAULT_CONFIG
-from skrl.agents.torch.dqn import DQN, DQN_DEFAULT_CONFIG          # DQN / DDQN
-from skrl.agents.torch.ppo import PPO, PPO_DEFAULT_CONFIG          # PPO / PPO_RNN
-
+from skrl.agents.torch.dqn import DQN, DQN_DEFAULT_CONFIG
+from skrl.agents.torch.ppo import PPO, PPO_DEFAULT_CONFIG
 from skrl.memories.torch import RandomMemory
 from skrl.trainers.torch import SequentialTrainer
 from skrl.models.torch import Model, GaussianMixin, DeterministicMixin
 
 import gymnasium as gym
 from gym_interface import make_vector_env
-from models import BasicLSTMNet, SpatioTemporalRLNNet, TransformerNet, DuelingTransformerNet, SpatioTempDuelingTransformerNet
+from models import get_model
 from utils import seed_everything, create_result_dir
 
-
-HERE = Path(__file__).resolve().parent  # folder that holds train.py
-
-# Load configuration from YAML
-#config_path = sys.argv[1] if len(sys.argv) > 1 else "default.yaml"
-
-#path to yaml file
-config_path = HERE / "configs" / "default.yaml"
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Load configuration from YAML
-config_path = Path(sys.argv[1]).expanduser() if len(sys.argv) > 1 \
-             else config_path
+config_path = SCRIPT_DIR / "configs" / "default.yaml"
+config_path = Path(sys.argv[1]).expanduser() if len(sys.argv) > 1 else config_path
 
 with open(config_path, 'r') as f:
     config = yaml.safe_load(f)
 
-# Set random seed for reproducibility
 seed_everything(config.get("seed", 0))
 
-# Create results directory and save a copy of the config
 results_dir = create_result_dir(config["experiment_name"])
 with open(os.path.join(results_dir, "config.yaml"), 'w') as f:
     yaml.safe_dump(config, f)
 
-# Initialize environment(s)
 env = make_vector_env(config)
-device = env.device  # device used by environment (e.g., "cpu" or "cuda")
+device = env.device
 
-# Configure agent based on selected algorithm
 algorithm = config["algorithm"].lower()
-
-#  skrl adapter for Dueling-Transformer Q-network (for DQN)
-class DuelingQNet(DeterministicMixin, Model):
-    def __init__(self, obs_space, act_space, device):
-        Model.__init__(self,
-                       observation_space=obs_space,
-                       action_space=act_space,
-                       device=device)
-        DeterministicMixin.__init__(self)
-
-        self.backbone = DuelingTransformerNet(
-            int(np.prod(obs_space.shape)),     # obs_dim
-            act_space.n if hasattr(act_space, "n") else int(np.prod(act_space.shape))
-        ).to(device)
-        self.device = device                  # used by skrl internals
-
-    # skrl calls .compute(); return (tensor, dict)
-    def compute(self, inputs, role):
-        # inputs["states"] already on correct device
-        q_values = self.backbone(inputs["states"])
-        return q_values, {}                   # second item must be dict
-
-    # convenience for vanilla forward() usage
-    def forward(self, x):
-        return self.backbone(x)
-
-    def set_mode(self, mode: str):
-        self.eval() if mode == "eval" else self.train()
-#
-
+model_type = config.get("model_type", "basic_lstm").lower()
 
 if algorithm == "dqn":
-    # Off-policy DQN configuration
     obs_dim = env.observation_space.shape[0]
-    num_actions = env.action_space.n if hasattr(env.action_space, 'n') else env.action_space.shape[0]
+    num_actions = env.action_space.n if hasattr(env.action_space, 'n') else int(np.prod(env.action_space.shape))
 
-    # Initialize Q-network and target network using Dueling Transformer architecture
+    # Use get_model for DQN backbone
+    q_backbone = get_model(model_type, obs_dim, num_actions, config)
+    target_backbone = get_model(model_type, obs_dim, num_actions, config)
+
+    # DuelingQNet wrapper for skrl
+    class DuelingQNet(DeterministicMixin, Model):
+        def __init__(self, backbone, obs_space, act_space, device):
+            Model.__init__(self, observation_space=obs_space, action_space=act_space, device=device)
+            DeterministicMixin.__init__(self)
+            self.backbone = backbone.to(device)
+            self.device = device
+
+        # skrl calls .compute(); return (tensor, dict)
+        def compute(self, inputs, role):
+            # inputs["states"] already on correct device
+            q_values = self.backbone(inputs["states"])
+            return q_values, {}                   # second item must be dict
+
+        # convenience for vanilla forward() usage
+        def forward(self, x):
+            return self.backbone(x)
+
+        def set_mode(self, mode: str):
+            self.eval() if mode == "eval" else self.train()
+    #
+
+
     models = {
-        "q_network"        : DuelingQNet(env.observation_space, env.action_space, device),
-        "target_q_network" : DuelingQNet(env.observation_space, env.action_space, device)
+        "q_network": DuelingQNet(q_backbone, env.observation_space, env.action_space, device),
+        "target_q_network": DuelingQNet(target_backbone, env.observation_space, env.action_space, device)
     }
-    #models["q_network"] = DuelingTransformerNet(obs_dim, num_actions)
-    #models["target_q_network"] = DuelingTransformerNet(obs_dim, num_actions)
     models["q_network"].to(device)
     models["target_q_network"].to(device)
 
@@ -139,27 +120,7 @@ elif algorithm == "ppo":
     # Select neural network architecture for policy/value
     model_type = config.get("model_type", "basic_lstm").lower()
 
-    if model_type == "basic_lstm":
-        base_model = BasicLSTMNet(obs_dim, action_dim)
-
-    elif model_type == "spatiotemporal_rln":
-        base_model = SpatioTemporalRLNNet(obs_dim, action_dim)
-
-    elif model_type == "transformer":
-        base_model = TransformerNet(obs_dim, action_dim)
-        
-    elif model_type == "dueling_transformer":
-        print("DuelingTransformer selected for PPO; using TransformerNet for actor-critic.")
-        base_model = TransformerNet(obs_dim, action_dim)
-
-    elif model_type == "spatiotemp_dueling_transformer":
-        seq_len     = config.get("seq_len", 4)       # see default.yaml
-        num_ranges  = config.get("num_ranges", 1080) # full lidar beams
-        q_net       = SpatioTempDuelingTransformerNet(seq_len, num_ranges, num_actions)
-        target_net  = SpatioTempDuelingTransformerNet(seq_len, num_ranges, num_actions)
-        
-    else:
-        base_model = BasicLSTMNet(obs_dim, action_dim)
+    base_model = get_model(model_type, obs_dim, action_dim, config)
     base_model.to(device)
 
     # Wrap the base model to create separate policy and value models (shared parameters)
