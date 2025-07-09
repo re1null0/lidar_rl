@@ -3,6 +3,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from gymnasium.wrappers import RecordEpisodeStatistics
+from track import Track
 from skrl.envs.wrappers.torch import wrap_env
 
 # Custom environment wrapper for F1TENTH gym to handle observation processing, noise, and reward shaping.
@@ -23,15 +24,30 @@ class F110EnvWrapper(gym.Env):
                 'I': rng.uniform(0.04, 0.05)
             }
         
-        # Create the underlying F1TENTH gym environment
-        env_id = config.get("env_id", "f1tenth_gym:f1tenth-v0")
+        env_id   = config.get("env_id", "f1tenth_gym:f1enth-v0")
         map_path = config.get("map_path", None)
-        self.env = gym.make(env_id, seed=seed, map=map_path, params=params, model='dynamic_ST', num_agents=1)
+        # Track() will read the same YAML, build centerline & .waypoints
+        self.track     = Track(map_path)
+        waypoints      = self.track.waypoints
+        timestep       = config.get("timestep", 0.1)
+        self.env = gym.make(
+            env_id,
+            seed=seed,
+            map=map_path,
+            params=params,
+            model="dynamic_ST",
+            num_agents=1,
+            waypoints=waypoints,
+            timestep=timestep
+        )
 
         # If max_episode_steps is set, (optional) handle termination after that many steps
         self._max_episode_steps = config.get("max_episode_steps", None)
         self.current_step = 0
-
+        self.last_linear_velocity    = None
+        self.last_steering_angle     = None
+        self.last_frenet_arc_length  = None
+        self.timestep                = timestep
         # Determine observation space dimensions
         lidar_enabled = config["lidar"]["enabled"]
         lidar_downsample = config["lidar"]["downsample"]
@@ -40,6 +56,7 @@ class F110EnvWrapper(gym.Env):
         state_dim = 1 if config.get("include_velocity_in_obs", True) else 0
         obs_dim = state_dim + lidar_dim
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
+
 
         # Determine action space: continuous for PPO/A2C, discrete for DQN
         self.discrete_actions = None
@@ -76,9 +93,24 @@ class F110EnvWrapper(gym.Env):
             raise RuntimeError("Observation dict does not contain expected keys for speed extraction.")
         
 
+    def cartesian_to_frenet(self, x, y, phi, s_guess=None):
+        if s_guess is None:
+            s_guess = self.s_guess
 
+        s, ey = self.centerline.calc_arclength(x, y, s_guess)
+        s = s % self.s_frame_max
+        self.s_guess = s
 
-        
+        yaw = self.centerline.calc_yaw(s)
+        normal = np.asarray([-np.sin(yaw), np.cos(yaw)])
+        x_eval, y_eval = self.centerline.calc_position(s)
+        dx = x - x_eval
+        dy = y - y_eval
+        distance_sign = np.sign(np.dot([dx, dy], normal))
+        ey = ey * distance_sign
+        phi = phi - yaw
+        return s, ey, np.arctan2(np.sin(phi), np.cos(phi))
+
 
     def _extract_lidar(self, obs):
         """Extract LiDAR scan array from observation dict (handles different keys)."""
@@ -104,6 +136,7 @@ class F110EnvWrapper(gym.Env):
         # Reset tracking variables
         self.last_speed = 0.0
         self.last_steer = 0.0
+        self.last_frenet_s = None
         self.total_abs_speed = 0.0
         self.total_abs_steer_change = 0.0
 
@@ -112,17 +145,15 @@ class F110EnvWrapper(gym.Env):
         return processed_obs, info
 
     def step(self, action):
-        """Step the environment with the given action and return processed observation, reward, done flags, and info."""
         self.current_step += 1
-        # Map discrete action index to actual action values if using discrete actions
+
         if self.discrete_actions is not None:
             actual_action = self.discrete_actions[action]
         else:
             actual_action = np.array(action, dtype=np.float32)
             if actual_action.ndim == 1:
-                actual_action = actual_action[None, :]  # add batch dimension for single agent
+                actual_action = actual_action[None, :]
 
-        # Ensure action shape matches number of agents in underlying env
         try:
             n_agents = len(self.env.get_wrapper_attr('agents')) \
                 if self.env.get_wrapper_attr('agents') is not None \
@@ -134,78 +165,60 @@ class F110EnvWrapper(gym.Env):
         elif actual_action.shape[0] != n_agents:
             actual_action = np.tile(actual_action[0], (n_agents, 1))
 
-        # Step the underlying environment
         result = self.env.step(actual_action)
         if len(result) == 5:
             obs_dict, env_reward, terminated, truncated, info = result
         else:
             obs_dict, env_reward, done, info = result
-            terminated, truncated = done, False  # ensure terminated/truncated flags
+            terminated, truncated = done, False
 
-        # Compute shaped reward components
-        speed = abs(self._extract_speed(obs_dict))
-        steer = float(actual_action[0, 0])  # steering command of first agent
-        steering_delta = abs(steer - self.last_steer)
-        progress_reward = 100.0  # TODO: (optional track progress if available)
-        speed_reward = speed - 1.0  # reward for speed (baseline 1 m/s)
-        accel = abs(speed - self.last_speed)
-        collision = bool(obs_dict.get("collisions", [False])[0])
-        # Combine reward with weights
-        weight = self.config["reward_weights"]
-        reward = weight.get("progress", 0.0) * progress_reward \
-               + weight.get("speed", 0.0) * speed_reward \
-               - weight.get("steering_change", 0.0) * steering_delta \
-               - weight.get("acceleration", 0.0) * accel \
-               - (weight.get("collision", 0.0) * 1.0 if collision else 0.0)
+        #rl_env.py logic
+        linear_velocity       = obs_dict["linear_vels_x"][0]
+        frenet_arc_length     = obs_dict["state_frenet"][0][0]
+        frenet_lateral_offset = obs_dict["state_frenet"][0][1]
+        collision             = bool(obs_dict["collisions"][0])
+        angular_velocity      = obs_dict["ang_vels_z"][0]
 
-        # Update cumulative metrics and last values
-        self.total_abs_speed += speed
-        self.total_abs_steer_change += steering_delta
-        self.last_speed = speed
-        self.last_steer = steer
+        linear_acceleration  = 0.0
+        steering_angle_speed = 0.0
+        if self.last_linear_velocity is not None:
+            linear_acceleration = abs(linear_velocity - self.last_linear_velocity) / self.timestep
+        if self.last_steering_angle is not None:
+            steering_angle_speed = abs(float(actual_action[0,0]) - self.last_steering_angle) / self.timestep
+
+        if (self.last_frenet_arc_length is not None and
+            frenet_arc_length - self.last_frenet_arc_length < -10):
+            self.last_frenet_arc_length = None
+
+        if self.last_frenet_arc_length is None:
+            progress_reward = 0.0
+        else:
+            progress_reward = frenet_arc_length - self.last_frenet_arc_length
+        self.last_frenet_arc_length = frenet_arc_length
+
+        safety_distance_reward     = 0.5 - abs(frenet_lateral_offset)
+        linear_velocity_reward     = abs(linear_velocity) - 1.0
+        collision_punishment       = -1.0 if collision else 0.0
+        angular_velocity_punishment= -abs(angular_velocity)
+        acceleration_punishment    = -linear_acceleration
+        steering_speed_punishment  = -steering_angle_speed
+
+        # single-agent weights
+        reward = (
+              20.0   * progress_reward
+            +  0.0   * safety_distance_reward
+            +  1.0   * linear_velocity_reward
+            +1000.0  * collision_punishment
+            +  0.0   * angular_velocity_punishment
+            +  0.0   * acceleration_punishment
+            +  0.05  * steering_speed_punishment
+        )
+
+        self.last_linear_velocity   = linear_velocity
+        self.last_steering_angle    = float(actual_action[0,0])
 
         processed_obs = self._process_obs(obs_dict)
-        # If episode ends, add custom metrics to info for logging
-        # if terminated or truncated:
-        #     info_episode = info.get("episode", {})
-        #     info_episode["avg_speed"] = (self.total_abs_speed / self.current_step) if self.current_step > 0 else 0.0
-        #     info_episode["avg_steering_change"] = (self.total_abs_steer_change / self.current_step) if self.current_step > 0 else 0.0
-        #     info["episode"] = info_episode
-
         return processed_obs, reward, terminated, truncated, info
-
-
-    '''
-    def _process_obs(self, obs_dict):
-        """Return a flat vector of length self.observation_space.shape[0]."""
-        target_len = self.observation_space.shape[0]
-        vec        = np.zeros(target_len, dtype=np.float32)   # pre-allocate
-
-        idx = 0
-        # ───── speed ───────────────────────────────────────────────
-        if self.config.get("include_velocity_in_obs", True):
-            speed = self._extract_speed(obs_dict)
-            if self.speed_noise_std > 0:
-                speed += np.random.normal(0, self.speed_noise_std)
-            vec[idx] = speed
-            idx += 1
-
-        # ───── LiDAR ───────────────────────────────────────────────
-        if self.config["lidar"]["enabled"]:
-            scan = self._extract_lidar(obs_dict)
-            if scan is not None:
-                if self.config["lidar"]["downsample"]:
-                    scan = scan[::10]                        # 108 readings if 1080 raw
-                if self.lidar_noise_std > 0:
-                    scan = np.clip(
-                        scan + np.random.normal(0, self.lidar_noise_std, size=scan.shape) * scan,
-                        0.0, np.inf
-                    )
-                scan_len          = min(len(scan), target_len - idx)
-                vec[idx: idx+scan_len] = scan[:scan_len]
-
-        return vec
-    '''
 
     
     def _process_obs(self, obs_dict):
@@ -218,6 +231,15 @@ class F110EnvWrapper(gym.Env):
             if self.speed_noise_std > 0:
                 speed += np.random.normal(0, self.speed_noise_std)
             obs_vec.append(speed)
+
+        s_raw, d_raw = obs_dict["state_frenet"][0]
+
+        # 2b) Clip to sane ranges (just like rl_env does)
+        s = float(np.clip(s_raw, -1000.0, 1000.0))
+        d = float(np.clip(d_raw,   -5.0,    5.0))
+
+        # 2c) Add them at the front of your observation vector
+        obs_vec.extend([s, d])
 
         # Include LiDAR scan if enabled
         lidar_scan = None
@@ -233,17 +255,6 @@ class F110EnvWrapper(gym.Env):
                 lidar_scan = np.clip(lidar_scan + noise * lidar_scan, 0.0, np.inf)
             obs_vec.extend(lidar_scan.astype(np.float32))
         obs_array = np.array(obs_vec, dtype=np.float32)
-
-        ###### SAFETY PAD so len(obs_vec) == self.observation_space.shape[0] ####
-        target = self.observation_space.shape[0]
-        if len(obs_vec) < target:
-            obs_vec.extend([0.0] * (target - len(obs_vec)))      # pad missing slots
-        elif len(obs_vec) > target:
-            obs_vec = obs_vec[:target]                           # rare: trim extras
-
-        obs_array = np.array(obs_vec, dtype=np.float32)
-        return obs_array
-    
 
 def make_vector_env(config):
     """Create a vectorized environment with the specified number of parallel F1TENTH environments."""

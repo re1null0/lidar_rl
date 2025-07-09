@@ -8,7 +8,29 @@ max_episode_steps: 1000                 # Max steps per episode
 domain_randomization: true             # Randomize dynamics parameters if true
 sensor_noise:                          
   lidar: 0.01                           # Gaussian noise for LiDAR readings (fractional)
-  speed: 0.05                           # Gaussian noise for speed sensorc
+  speed: 0.05                           # Gaussian noise for speed sensor - DELETE?
+
+model:
+  # options: basic_lstm, bilstm, spatiotemporal_rln, transformer, dueling_transformer, spatiotemp_dueling_transformer
+  type: bilstm
+
+  # input/output dims
+  obs_dim: 1082           # e.g. 1 speed + 1080 LiDAR beams + 1 d-offset
+  action_dim: 2           # steering & throttle
+
+  # BiLSTM hyperparameters
+  hidden_dim: 64          # hidden units per direction
+  num_layers: 1           # stacked LSTM layers
+  bidirectional: true     # just for clarity in your config
+
+  # transformer & other nets 
+  n_heads: 4
+  n_layers: 2
+  embed_dim: 64
+
+  # spatiotemp dueling transformer
+  seq_len: 5
+  num_ranges: 1080
 
 # Observation settings
 lidar:
@@ -16,28 +38,18 @@ lidar:
   downsample: false                    # If true, downsample LiDAR (e.g. 108 beams instead of 1080)
 include_velocity_in_obs: true          # Include vehicle speed in observation vector
 
-# Reward function weights
-reward_weights:
-  progress: 0.0        # Forward progress (unused if no track reference)
-  speed: 1.0           # Reward for speed (m/s)
-  steering_change: 0.05  # Penalty for steering angle change
-  acceleration: 0.0      # Penalty for acceleration change
-  collision: 1000.0      # Penalty for crash/collision (large)
 
-# Model and algorithm
+# Model and algorithm - delete?
 algorithm: "ppo"                     # Training algorithm: "ppo" (on-policy) or "dqn" (off-policy)
-model_type: "basic_lstm"             # Model architecture: basic_lstm, spatiotemporal_rln, transformer, dueling_transformer, spatiotemp_dueling_transformer
 total_timesteps: 10000000             # Total training timesteps
-seq_len: 4          # frames per state
-num_ranges: 1080    # lidar points per scan
-learning_rate: 0.0003               # Optimizer learning rate
+learning_rate: 0.03               # Optimizer learning rate
 gamma: 0.99                         # Discount factor
 gae_lambda: 0.95                    # GAE lambda for advantage estimation (PPO)
 ppo_clip: 0.2                       # PPO clipping epsilon
 ppo_epochs: 4                       # Number of epoch updates per PPO rollout
 batch_size: 64                      # Minibatch size for updates (if applicable)
-
 rollout_steps: 1024                 # Steps per rollout (on-policy update interval)
+
 # DQN-specific settings
 replay_buffer_size: 10000           # Replay buffer capacity
 target_update_interval: 1000        # Frequency of target network updates
