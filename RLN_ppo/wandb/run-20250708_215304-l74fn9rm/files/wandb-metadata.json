@@ -1,0 +1,43 @@
+{
+  "os": "Linux-6.8.0-60-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.10.12",
+  "startedAt": "2025-07-09T01:53:04.404947Z",
+  "program": "/home/saichand/ros2_ws/src/RL_RecurrentLidarNet/RLN_ppo/train_ppo.py",
+  "codePath": "RLN_ppo/train_ppo.py",
+  "git": {
+    "remote": "https://github.com/JeffersonKoumbaMoussadjiLu/RL_RecurrentLidarNet.git",
+    "commit": "d10c0f8ab5b4c654746184387fb17901158ba663"
+  },
+  "email": "kapuri@seas.upenn.edu",
+  "root": "/home/saichand/ros2_ws/src/RL_RecurrentLidarNet/RLN_ppo",
+  "host": "retrolifts-R15",
+  "executable": "/home/saichand/ros2_ws/src/gym_env/bin/python3",
+  "codePathLocal": "train_ppo.py",
+  "cpu_count": 12,
+  "cpu_count_logical": 24,
+  "gpu": "NVIDIA GeForce RTX 4070",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "244939624448",
+      "used": "211226836992"
+    }
+  },
+  "memory": {
+    "total": "33335812096"
+  },
+  "cpu": {
+    "count": 12,
+    "countLogical": 24
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce RTX 4070",
+      "memoryTotal": "12878610432",
+      "cudaCores": 5888,
+      "architecture": "Ada",
+      "uuid": "GPU-01742249-2ba4-b0dc-dd31-1884eed058da"
+    }
+  ],
+  "cudaVersion": "12.4"
+}

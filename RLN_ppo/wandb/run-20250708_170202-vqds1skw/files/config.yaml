@@ -1,0 +1,103 @@
+_wandb:
+    value:
+        cli_version: 0.20.1
+        m: []
+        python_version: 3.10.12
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 13
+                - 15
+                - 16
+                - 35
+                - 55
+            "4": 3.10.12
+            "5": 0.20.1
+            "12": 0.20.1
+            "13": linux-x86_64
+clip_predicted_values:
+    value: false
+close_environment_at_exit:
+    value: true
+disable_progressbar:
+    value: false
+discount_factor:
+    value: 0.99
+entropy_loss_scale:
+    value: 0.01
+environment_info:
+    value: episode
+experiment:
+    value:
+        checkpoint_interval: 10000
+        directory: results/2025-07-08_170200_f1tenth_experiment
+        experiment_name: f1tenth_experiment
+        store_separately: false
+        wandb: true
+        wandb_kwargs:
+            name: experiment-test
+            project: f1tenth-rl
+            tags: []
+        write_interval: 1000
+        writer: wandb
+grad_norm_clip:
+    value: 0.5
+headless:
+    value: true
+kl_threshold:
+    value: 0
+lambda:
+    value: 0.95
+learning_epochs:
+    value: 4
+learning_rate:
+    value: 0.0003
+learning_rate_scheduler:
+    value: null
+learning_starts:
+    value: 0
+mini_batches:
+    value: 16
+mixed_precision:
+    value: false
+policy:
+    value:
+        base: |-
+            BasicLSTMNet(
+              (lstm): LSTM(1081, 128)
+              (actor): Linear(in_features=128, out_features=2, bias=True)
+              (critic): Linear(in_features=128, out_features=1, bias=True)
+            )
+random_timesteps:
+    value: 0
+ratio_clip:
+    value: 0.2
+rewards_shaper:
+    value: null
+rollouts:
+    value: 1024
+state_preprocessor:
+    value: null
+stochastic_evaluation:
+    value: false
+time_limit_bootstrap:
+    value: false
+timesteps:
+    value: 10000000
+value:
+    value:
+        base: |-
+            BasicLSTMNet(
+              (lstm): LSTM(1081, 128)
+              (actor): Linear(in_features=128, out_features=2, bias=True)
+              (critic): Linear(in_features=128, out_features=1, bias=True)
+            )
+value_clip:
+    value: 0.2
+value_loss_scale:
+    value: 1
+value_preprocessor:
+    value: null
