@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from gymnasium.wrappers import RecordEpisodeStatistics
-from track import Track
+# from track import Track
 from skrl.envs.wrappers.torch import wrap_env
 
 # Custom environment wrapper for F1TENTH gym to handle observation processing, noise, and reward shaping.
@@ -27,7 +27,7 @@ class F110EnvWrapper(gym.Env):
         env_id   = config.get("env_id", "f1tenth_gym:f1enth-v0")
         map_path = config.get("map_path", None)
         # Track() will read the same YAML, build centerline & .waypoints
-        self.track     = Track(map_path)
+        # self.track     = Track(map_path)
         waypoints      = self.track.waypoints
         timestep       = config.get("timestep", 0.1)
         self.env = gym.make(
