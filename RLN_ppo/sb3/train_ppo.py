@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from sb3_contrib import RecurrentPPO
 from stable_baselines3.common.callbacks import CheckpointCallback
-from gym_interface_sb3 import make_vec_env
+from gym_interface_sb3 import make_vec_env_sb3
 
 
 def seed_everything(seed: int):
