@@ -72,7 +72,7 @@ class F110EnvJaxSingle:
 
         self.last_frenet_s = float(s)
         self.last_lin_vel   = float(lin_v)
-        self.last_str_ang   = float(action[0])
+        self.last_str_angf  = float(action[0])
 
         done = dones['agent_0']
         return obs, state, reward, done, info
